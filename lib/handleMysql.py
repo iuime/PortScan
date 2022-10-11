@@ -11,9 +11,9 @@ class handleMysql(object):
             cursor=self.conn.cursor()
             cursor.execute(sql)
             self.conn.commit()
-        except Exception,e:
+        except Exception as e:
             self.conn.rollback()
-            print e
+            print(e)
         cursor.close()
     def Truncate(self,table):
         try:
@@ -21,9 +21,9 @@ class handleMysql(object):
             sql='truncate table '+table
             cursor.execute(sql)
             self.conn.commit()
-        except Exception,e:
+        except Exception as e:
             self.conn.rollback()
-            print e
+            print(e)
         cursor.close()
 
     def Select(self,sql):
@@ -31,8 +31,8 @@ class handleMysql(object):
             cursor=self.conn.cursor()
             cursor.execute(sql)
             rs=cursor.fetchall()
-        except Exception,e:
-            print e
+        except Exception as e:
+            print(e)
         cursor.close()
         
         return rs
