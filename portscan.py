@@ -5,7 +5,7 @@
 #  Date:2015/11/18
 #++++++++++++++++++++++++++++++++++++++++++++++++++++
 import sys,os,time
-from ConfigParser import ConfigParser
+from configparser import ConfigParser
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser, NmapParserException
 
@@ -15,7 +15,7 @@ LibDir=BaseDir+'/lib'
 sys.path.append(LibDir)
 
 from handleMysql import handleMysql
-from public import sendMail
+from public import sendWebhook
 
 
 #全局变量
@@ -32,7 +32,8 @@ DBPWD=CF.get('DB','dbpwd')
 DBPORT=CF.get('DB','dbport')
 
 SUBJECT=CF.get('NMAP','subject')
-MAIL=CF.get('NMAP','maillist')
+Webhookkey=CF.get('NMAP','Webhookkey')
+
 
 SYNC=handleMysql(DBHOST, DBUSER, DBPWD, DBNAME, int(DBPORT),'utf8')
 
@@ -44,35 +45,37 @@ time.sleep(1)
 def do_scan(targets, options):
     parsed = None
     nmproc = NmapProcess(targets, options)
+    print(nmproc)
     rc = nmproc.run()
     if rc != 0:
-        print("nmap scan failed: {0}".format(nmproc.stderr))
+        print(("nmap scan failed: {0}".format(nmproc.stderr)))
     #print(nmproc.stdout)
 
     try:
         parsed = NmapParser.parse(nmproc.stdout)
+        print(parsed)
     except NmapParserException as e:
-        print("Exception raised while parsing scan: {0}".format(e.msg))
+        print(("Exception raised while parsing scan: {0}".format(e.msg)))
 
     return parsed
 
 
 # print scan results from a nmap report
 def saveToDB(nmap_report):
-    print("Starting Nmap {0} ( http://nmap.org )".format(nmap_report.version))
+    print(("Starting Nmap {0} ( http://nmap.org )".format(nmap_report.version)))
     
     for host in nmap_report.hosts:
         hostname=''
         newports=[]
-        print("Nmap scan : {0}".format(host.address))
+        print(("Nmap scan : {0}".format(host.address)))
         #print host.address,host.endtime,host.hostnames,host.status
         if len(host.hostnames)>0:
             hostname=host.hostnames[0]
         if host.status=='down':
-            print("host:{0} is down!".format(host.address))
+            print(("host:{0} is down!".format(host.address)))
             continue
         else:
-            print("host:{0} is up!".format(host.address))
+            print(("host:{0} is up!".format(host.address)))
         endtime=time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(float(host.endtime)))
 
         first_scan=isFirstScan(host.address)
@@ -98,7 +101,7 @@ def saveToDB(nmap_report):
                 SYNC.DMLSQL(sql)
         delDownPort(host.address,newports) #删除库中已经关闭的端口
 
-    print(nmap_report.summary) 
+    print((nmap_report.summary)) 
 
 def isFirstScan(ip): 
     flag=True #默认首次扫描  
@@ -107,6 +110,7 @@ def isFirstScan(ip):
     for row in rows:
         if row[0] > 0:
             flag=False
+    flag=False #首次扫描也告警    新IP不告警则注释此行
     return flag
 
 def delDownPort(ip,newlist):
@@ -124,19 +128,20 @@ def notification():
     sql="select ip,port,service from data_newport where date > '%s' order by ip" % SCAN_TIME
     rows=SYNC.Select(sql)
     count = len(rows)
-    mailMsg='扫描时间:%s\n'%SCAN_TIME
-    mailMsg+='共有%d个端口新增:\n'% count
-    mailMsg+='端口列表:\n'
-    mailMsg+='{0:<15s}  {1:<6s}  {2}\n'.format('IP','PORT','SERVICE')
+    alertMsg='扫描时间:%s\n'%SCAN_TIME
+    alertMsg+='共有%d个端口新增:\n'% count
+    alertMsg+='端口列表:\n'
+    alertMsg+='{0:<15s}  {1:<6s}  {2}\n'.format('IP','PORT','SERVICE')
     for row in rows:
-        mailMsg+='{0:<15s}  {1:<6s}  {2}\n'.format(row[0],row[1],row[2])
+        alertMsg+='{0:<15s}  {1:<6s}  {2}\n'.format(row[0],row[1],row[2])
     if count > 0:
-        sendMail(mailMsg,MAIL,SUBJECT)
+        sendWebhook(alertMsg,Webhookkey,SUBJECT)
     else:
         print("No new ports returned")      
 
 if __name__ == "__main__":
-    
+    #iplist='''aws ec2 describe-network-interfaces --query "NetworkInterfaces[*][].{Public: Association.PublicIp}"|grep -Eo '([0-9]{1,3}.){3}[0-9]{1,3}' > conf/ip.ini'''
+    #os.system(iplist)
     nmap_options=CF.get('NMAP','options')
     with open(IP_FILE) as f:
         for line in f.readlines():
@@ -144,8 +149,10 @@ if __name__ == "__main__":
             report = do_scan(ip, nmap_options)
             if report:
                 saveToDB(report) #扫描结果入库
+                print(report)
                 pass
             else:
                 print("No results returned")
         notification() #新增端口报警
     SYNC.Disconnect()
+
